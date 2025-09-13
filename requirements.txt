@@ -1,4 +1,2 @@
-aiogram==3.10.0
-python-dotenv
-pyTelegramBotAPI
-Flask
+pyTelegramBotAPI==4.13.0
+Flask==2.3.3
