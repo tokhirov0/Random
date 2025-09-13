@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 import threading
 
-# --- ENV sozlamalar (Render Environment Variables orqali) ---
+# --- Environment Variables (Render.com) ---
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT TOKEN Environment Variables da topilmadi!")
@@ -17,9 +17,9 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # --- Ma'lumotlar ---
-users = {}
-waiting = []
-active = {}
+users = {}      # foydalanuvchi profillari
+waiting = []    # kutayotgan foydalanuvchilar
+active = {}     # suhbatlashayotganlar
 
 # --- Render uchun test route ---
 @app.route("/")
@@ -43,6 +43,8 @@ def menu():
     m.add(InlineKeyboardButton("🔎 Izlash", callback_data="find"))
     m.add(InlineKeyboardButton("💬 Suhbatni yopish", callback_data="stop"))
     m.add(InlineKeyboardButton("ℹ️ Bot haqida", callback_data="about"))
+    if users.get("is_admin"):
+        m.add(InlineKeyboardButton("📢 Broadcast", callback_data="broadcast"))
     return m
 
 # --- Start komandasi ---
@@ -93,11 +95,15 @@ def profile_handler(msg):
             file_id = msg.photo[-1].file_id
             users[uid]["photo"] = file_id
             users[uid]["step"] = "done"
-            bot.send_message(uid, "✅ Rasm qabul qilindi. Profilingiz to‘liq!")
-            # Kanalga yuborish
+
+            # Kanalga yuborish + inline tugma
             caption = f"👤 Yangi profil:\n👥 Jinsi: {users[uid]['gender']}\n🎂 Yosh: {users[uid]['age']}"
-            bot.send_photo(CHANNELS[1], file_id, caption=caption)
-            bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=menu())
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("💬 Suhbatlashish", callback_data=f"start_chat_{uid}"))
+            bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
+
+            # Foydalanuvchiga xabar
+            bot.send_message(uid, "✅ Profil kanalga yuborildi!", reply_markup=menu())
         else:
             bot.send_message(uid, "Iltimos, rasm yuboring.")
 
@@ -112,7 +118,10 @@ def profile_handler(msg):
 @bot.callback_query_handler(func=lambda c: True)
 def cb(call):
     uid = call.from_user.id
-    if call.data == "find":
+    data = call.data
+
+    # Suhbat izlash
+    if data == "find":
         if uid in active or uid in waiting:
             bot.answer_callback_query(call.id, "Siz allaqachon suhbatdasiz yoki kutyapsiz!")
             return
@@ -126,7 +135,8 @@ def cb(call):
             bot.send_message(u1, "✅ Suhbatdosh topildi!")
             bot.send_message(u2, "✅ Suhbatdosh topildi!")
 
-    elif call.data == "stop":
+    # Suhbatni tugatish
+    elif data == "stop":
         if uid in active:
             partner = active.pop(uid)
             active.pop(partner, None)
@@ -135,8 +145,41 @@ def cb(call):
         else:
             bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu())
 
-    elif call.data == "about":
+    # Bot haqida
+    elif data == "about":
         bot.send_message(uid, "ℹ️ RandomChat bot — anonim suhbatlar uchun yaratilgan.")
+
+    # Kanal postidan suhbat boshlash
+    elif data.startswith("start_chat_"):
+        target_uid = int(data.split("_")[-1])
+        waiting.append(uid)
+        bot.answer_callback_query(call.id, "⏳ Suhbatdosh qidirilmoqda...")
+        if len(waiting) >= 2:
+            u1 = waiting.pop(0)
+            u2 = waiting.pop(0)
+            active[u1] = u2
+            active[u2] = u1
+            bot.send_message(u1, "✅ Suhbatdosh topildi!")
+            bot.send_message(u2, "✅ Suhbatdosh topildi!")
+
+    # Admin uchun broadcast tugmasi
+    elif data == "broadcast" and uid == ADMIN_ID:
+        bot.send_message(uid, "❗ Matnni yuboring, barcha foydalanuvchilarga xabar yuboriladi.")
+        users[uid]["step"] = "broadcast"
+
+# --- Broadcast matnini qabul qilish ---
+@bot.message_handler(func=lambda m: users.get(m.from_user.id, {}).get("step") == "broadcast", content_types=["text"])
+def broadcast_handler(msg):
+    text = msg.text
+    uid = msg.from_user.id
+    for u in users:
+        if u != ADMIN_ID:
+            try:
+                bot.send_message(u, f"📢 Broadcast:\n{text}")
+            except:
+                pass
+    bot.send_message(uid, "✅ Xabar barcha foydalanuvchilarga yuborildi!")
+    users[uid]["step"] = None
 
 # --- Run ---
 def run():
