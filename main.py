@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 import threading
 
-# --- Environment Variables (Render.com) ---
+# --- Environment Variables ---
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT TOKEN Environment Variables da topilmadi!")
@@ -21,7 +21,7 @@ users = {}      # foydalanuvchi profillari
 waiting = []    # kutayotgan foydalanuvchilar
 active = {}     # suhbatlashayotganlar
 
-# --- Render uchun test route ---
+# --- Flask route ---
 @app.route("/")
 def home():
     return "RandomChat Bot is running!"
@@ -38,12 +38,12 @@ def check_sub(user_id):
     return True
 
 # --- Asosiy menyu ---
-def menu():
+def menu(uid=None):
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔎 Izlash", callback_data="find"))
     m.add(InlineKeyboardButton("💬 Suhbatni yopish", callback_data="stop"))
     m.add(InlineKeyboardButton("ℹ️ Bot haqida", callback_data="about"))
-    if users.get("is_admin"):
+    if uid == ADMIN_ID:
         m.add(InlineKeyboardButton("📢 Broadcast", callback_data="broadcast"))
     return m
 
@@ -61,7 +61,7 @@ def start(msg):
         users[uid] = {"step": "gender"}
         bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol")
     else:
-        bot.send_message(uid, "Asosiy menyu:", reply_markup=menu())
+        bot.send_message(uid, "Asosiy menyu:", reply_markup=menu(uid))
 
 # --- Profil to‘ldirish ---
 @bot.message_handler(func=lambda m: True, content_types=["text", "photo"])
@@ -103,7 +103,7 @@ def profile_handler(msg):
             bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
 
             # Foydalanuvchiga xabar
-            bot.send_message(uid, "✅ Profil kanalga yuborildi!", reply_markup=menu())
+            bot.send_message(uid, "✅ Profil kanalga yuborildi!", reply_markup=menu(uid))
         else:
             bot.send_message(uid, "Iltimos, rasm yuboring.")
 
@@ -140,10 +140,10 @@ def cb(call):
         if uid in active:
             partner = active.pop(uid)
             active.pop(partner, None)
-            bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=menu())
-            bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=menu())
+            bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=menu(uid))
+            bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=menu(partner))
         else:
-            bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu())
+            bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu(uid))
 
     # Bot haqida
     elif data == "about":
@@ -151,7 +151,6 @@ def cb(call):
 
     # Kanal postidan suhbat boshlash
     elif data.startswith("start_chat_"):
-        target_uid = int(data.split("_")[-1])
         waiting.append(uid)
         bot.answer_callback_query(call.id, "⏳ Suhbatdosh qidirilmoqda...")
         if len(waiting) >= 2:
