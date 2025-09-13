@@ -97,9 +97,9 @@ def profile_handler(msg):
             users[uid]["step"] = "done"
 
             # Kanalga yuborish + inline tugma
-            caption = f"👤 Yangi profil:\n👥 Jinsi: {users[uid]['gender']}\n🎂 Yosh: {users[uid]['age']}"
+            caption = f"Profil:\n👥 Jinsi: {users[uid]['gender']}\n🎂 Yosh: {users[uid]['age']}"
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("💬 Suhbatlashish", callback_data=f"start_chat_{uid}"))
+            markup.add(InlineKeyboardButton(f"💬 Suhbatlashish", callback_data=f"start_chat_{uid}"))
             bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
 
             # Foydalanuvchiga xabar
@@ -135,13 +135,20 @@ def cb(call):
             bot.send_message(u1, "✅ Suhbatdosh topildi!")
             bot.send_message(u2, "✅ Suhbatdosh topildi!")
 
-    # Suhbatni tugatish
+    # Suhbatni tugatish + Like/Dislike tugmalari
     elif data == "stop":
         if uid in active:
             partner = active.pop(uid)
             active.pop(partner, None)
-            bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=menu(uid))
-            bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=menu(partner))
+
+            markup = InlineKeyboardMarkup()
+            markup.add(
+                InlineKeyboardButton("👍 Like", callback_data=f"like_{partner}"),
+                InlineKeyboardButton("👎 Dislike", callback_data=f"dislike_{partner}")
+            )
+
+            bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=markup)
+            bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=markup)
         else:
             bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu(uid))
 
@@ -153,7 +160,7 @@ def cb(call):
     elif data.startswith("start_chat_"):
         target_uid = int(data.split("_")[-1])
         if uid not in users:
-            users[uid] = {"step": "gender"}  # Agar start bosilmagan bo‘lsa, profilni to‘ldirishga yo‘naltirish
+            users[uid] = {"step": "gender"}  # Profilni to‘ldirishga yo‘naltirish
             bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol")
             bot.answer_callback_query(call.id, "⏳ Avval profilni to‘ldiring...")
             return
@@ -167,6 +174,18 @@ def cb(call):
             active[u2] = u1
             bot.send_message(u1, "✅ Suhbatdosh topildi!")
             bot.send_message(u2, "✅ Suhbatdosh topildi!")
+
+    # Like / Dislike
+    elif data.startswith("like_") or data.startswith("dislike_"):
+        action, target_id = data.split("_")
+        target_id = int(target_id)
+
+        if action == "like":
+            bot.send_message(target_id, "✅ Sizga Like berildi!")
+            bot.send_message(uid, "Siz Like berdingiz!")
+        else:
+            bot.send_message(target_id, "❌ Sizga Dislike berildi!")
+            bot.send_message(uid, "Siz Dislike berdingiz!")
 
     # Admin uchun broadcast tugmasi
     elif data == "broadcast" and uid == ADMIN_ID:
