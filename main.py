@@ -37,21 +37,32 @@ def check_sub(user_id):
 
 def ensure_subscription(uid):
     if not check_sub(uid):
+        channels_list = [f"{i+1} - {ch}" for i, ch in enumerate(CHANNELS)]
+        message = "❌ Kechirasiz, botimizdan foydalanishingizdan oldin quyidagi kanallarga a'zo bo'lishingiz kerak:\n"
         markup = InlineKeyboardMarkup()
-        for ch in CHANNELS:
-            markup.add(InlineKeyboardButton(f"➕ {ch} ga obuna bo‘lish", url=f"https://t.me/{ch[1:]}"))
-        bot.send_message(uid, "❌ Botdan foydalanish uchun kanallarga obuna bo‘ling!", reply_markup=markup)
+        for channel in channels_list:
+            markup.add(InlineKeyboardButton(channel, url=f"https://t.me/{channel[4:]}"))  # Raqamdan keyingi kanal nomi
+        markup.add(InlineKeyboardButton("✅ Tasdiqlash", callback_data="check_subscription"))
+        bot.send_message(uid, message, reply_markup=markup)
         return False
     return True
 
 # --- Menyu ---
 def menu(uid=None):
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔎 Suhbatdosh topish", callback_data="find"))
+    m.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
     m.add(InlineKeyboardButton("💬 Suhbatni yopish", callback_data="stop"))
-    m.add(InlineKeyboardButton("ℹ️ Bot haqida", callback_data="about"))
+    m.add(InlineKeyboardButton("ℹ️ Bot haqida ma'lumot", callback_data="about"))
+    m.add(InlineKeyboardButton("📢 Kanaldan suhbatdosh topish", callback_data="channel_find"))
     if uid == ADMIN_ID:
-        m.add(InlineKeyboardButton("📢 Broadcast", callback_data="broadcast"))
+        m.add(InlineKeyboardButton("👤 Admin paneli", callback_data="admin_panel"))
+    return m
+
+# --- Admin paneli ---
+def admin_menu():
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("📢 Hammaga xabar yuborish", callback_data="broadcast"))
+    m.add(InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_menu"))
     return m
 
 # --- Start komandasi ---
@@ -62,7 +73,7 @@ def start(msg):
         return
 
     if uid not in users:
-        users[uid] = {"step": "gender", "likes":0, "dislikes":0}
+        users[uid] = {"step": "gender"}
 
         # Inline tugma bilan boshlash
         markup = InlineKeyboardMarkup()
@@ -106,13 +117,13 @@ def profile_handler(msg):
 
             # Kanalga yuborish
             caption = f"👤 Yangi profil:\n👥 Jinsi: {users[uid]['gender']}\n🎂 Yosh: {users[uid]['age']}"
-            bot.send_photo(CHANNELS[1], file_id, caption=caption)
-
-            # Like/Dislike + Suhbatdosh topish
             markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton(f"🔎 Suhbatdosh topish", callback_data="find")
-            )
+            markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
+            bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
+
+            # Foydalanuvchiga xabar
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
             bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=markup)
         else:
             bot.send_message(uid, "Iltimos, rasm yuboring.")
@@ -130,7 +141,13 @@ def cb(call):
     uid = call.from_user.id
     data = call.data
 
-    if data == "fill_profile":
+    if data == "check_subscription":
+        if check_sub(uid):
+            bot.edit_message_text("✅ Obuna tekshiruvi muvaffaqiyatli! Endi botdan foydalanishingiz mumkin.", chat_id=uid, message_id=call.message.message_id, reply_markup=menu(uid))
+        else:
+            bot.answer_callback_query(call.id, "❌ Hali barcha kanallarga obuna bo'lmadingiz!")
+
+    elif data == "fill_profile":
         users[uid]["step"] = "gender"
         bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol")
 
@@ -153,40 +170,44 @@ def cb(call):
             partner = active.pop(uid)
             active.pop(partner, None)
 
-            # Like/Dislike + Suhbatdosh topish
+            # Faqat suhbat qurish tugmasi
             markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton(f"👍 Like ({users[partner].get('likes',0)})", callback_data=f"like_{partner}"),
-                InlineKeyboardButton(f"👎 Dislike ({users[partner].get('dislikes',0)})", callback_data=f"dislike_{partner}")
-            )
-            markup.add(InlineKeyboardButton("🔎 Suhbatdosh topish", callback_data="find"))
+            markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
 
             bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=markup)
             bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=markup)
         else:
             bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu(uid))
 
-    elif data.startswith("like_") or data.startswith("dislike_"):
-        action, target_id = data.split("_")
-        target_id = int(target_id)
-        if action == "like":
-            users[target_id]["likes"] = users[target_id].get("likes",0)+1
-        else:
-            users[target_id]["dislikes"] = users[target_id].get("dislikes",0)+1
-
-        # Tugmani yangilash
-        markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton(f"👍 Like ({users[target_id]['likes']})", callback_data=f"like_{target_id}"),
-            InlineKeyboardButton(f"👎 Dislike ({users[target_id]['dislikes']})", callback_data=f"dislike_{target_id}")
-        )
-        markup.add(InlineKeyboardButton("🔎 Suhbatdosh topish", callback_data="find"))
-
-        bot.edit_message_reply_markup(chat_id=uid, message_id=call.message.message_id, reply_markup=markup)
-        bot.edit_message_reply_markup(chat_id=target_id, message_id=call.message.message_id, reply_markup=markup)
-
     elif data == "about":
         bot.send_message(uid, "ℹ️ RandomChat bot — anonim suhbatlar uchun yaratilgan.")
+
+    elif data == "channel_find":
+        bot.send_message(uid, f"📢 Suhbatdoshni kanal orqali toping: {CHANNELS[1]}")
+
+    elif data == "admin_panel":
+        if uid == ADMIN_ID:
+            bot.send_message(uid, "Admin paneli:", reply_markup=admin_menu())
+        else:
+            bot.answer_callback_query(call.id, "Siz admin emassiz!")
+
+    elif data == "broadcast":
+        if uid == ADMIN_ID:
+            bot.send_message(uid, "Xabarni kiriting:")
+            bot.register_next_step_handler(call.message, send_broadcast)
+
+    elif data == "back_to_menu":
+        bot.edit_message_text("Asosiy menyu:", chat_id=uid, message_id=call.message.message_id, reply_markup=menu(uid))
+
+# --- Broadcast funksiyasi ---
+def send_broadcast(msg):
+    text = msg.text
+    for user_id in users:
+        try:
+            bot.send_message(user_id, text)
+        except:
+            continue
+    bot.send_message(msg.from_user.id, "✅ Xabar yuborildi!")
 
 # --- Run ---
 def run():
