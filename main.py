@@ -4,9 +4,13 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 import threading
 
-# --- ENV sozlamalar ---
+# --- ENV sozlamalar (Render Environment Variables orqali) ---
 TOKEN = os.environ.get("TOKEN")
+if not TOKEN:
+    raise ValueError("❌ BOT TOKEN Environment Variables da topilmadi!")
+
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 6733100026))
+PORT = int(os.environ.get("PORT", 10000))
 CHANNELS = ["@shaxsiy_blog1o", "@anketaa_uz"]
 
 bot = telebot.TeleBot(TOKEN)
@@ -138,8 +142,7 @@ def cb(call):
 def run():
     t = threading.Thread(target=lambda: bot.infinity_polling())
     t.start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     run()
