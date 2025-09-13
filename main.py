@@ -151,7 +151,14 @@ def cb(call):
 
     # Kanal postidan suhbat boshlash
     elif data.startswith("start_chat_"):
-        waiting.append(uid)
+        target_uid = int(data.split("_")[-1])
+        if uid not in users:
+            users[uid] = {"step": "gender"}  # Agar start bosilmagan bo‘lsa, profilni to‘ldirishga yo‘naltirish
+            bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol")
+            bot.answer_callback_query(call.id, "⏳ Avval profilni to‘ldiring...")
+            return
+        if uid not in waiting:
+            waiting.append(uid)
         bot.answer_callback_query(call.id, "⏳ Suhbatdosh qidirilmoqda...")
         if len(waiting) >= 2:
             u1 = waiting.pop(0)
