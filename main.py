@@ -31,7 +31,8 @@ def check_sub(user_id):
             member = bot.get_chat_member(ch, user_id)
             if member.status not in ["member", "administrator", "creator"]:
                 return False
-        except:
+        except Exception as e:
+            print(f"Xato: {e}")
             return False
     return True
 
@@ -41,7 +42,7 @@ def ensure_subscription(uid):
         message = "❌ Kechirasiz, botimizdan foydalanishingizdan oldin quyidagi kanallarga a'zo bo'lishingiz kerak:\n"
         markup = InlineKeyboardMarkup()
         for channel in channels_list:
-            markup.add(InlineKeyboardButton(channel, url=f"https://t.me/{channel[4:]}"))  # Raqamdan keyingi kanal nomi
+            markup.add(InlineKeyboardButton(channel, url=f"https://t.me/{channel[4:]}"))
         markup.add(InlineKeyboardButton("✅ Tasdiqlash", callback_data="check_subscription"))
         bot.send_message(uid, message, reply_markup=markup)
         return False
@@ -61,12 +62,10 @@ def menu(uid=None):
 # --- Pastki Menyu ---
 def get_bottom_menu(uid=None):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(KeyboardButton("🔎 Suhbat qurish"))
-    markup.add(KeyboardButton("💬 Suhbatni yopish"))
-    markup.add(KeyboardButton("ℹ️ Bot haqida"))
-    markup.add(KeyboardButton("📢 Kanaldan topish"))
+    markup.row(KeyboardButton("🔎 Suhbat qurish"), KeyboardButton("💬 Suhbatni yopish"))
+    markup.row(KeyboardButton("ℹ️ Bot haqida"), KeyboardButton("📢 Kanaldan topish"))
     if uid == ADMIN_ID:
-        markup.add(KeyboardButton("👤 Admin paneli"))
+        markup.row(KeyboardButton("👤 Admin paneli"))
     return markup
 
 # --- Admin paneli ---
@@ -85,8 +84,6 @@ def start(msg):
 
     if uid not in users:
         users[uid] = {"step": "gender"}
-
-        # Inline tugma bilan boshlash
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📝 Profilni to‘ldirish", callback_data="fill_profile"))
         bot.send_message(uid, "✅ Obuna bo‘ldingiz! Endi profilni to‘ldiring.", reply_markup=markup)
@@ -133,11 +130,7 @@ def profile_handler(msg):
             markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
             bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
 
-            # Foydalanuvchiga xabar
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
-            bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=markup)
-            bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=get_bottom_menu(uid))
         else:
             bot.send_message(uid, "Iltimos, rasm yuboring.", reply_markup=get_bottom_menu(uid))
 
