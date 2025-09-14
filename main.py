@@ -1,6 +1,6 @@
 import os
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 import threading
 
@@ -59,15 +59,6 @@ def menu(uid=None):
         m.add(InlineKeyboardButton("👤 Admin paneli", callback_data="admin_panel"))
     return m
 
-# --- Pastki Menyu ---
-def get_bottom_menu(uid=None):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.row(KeyboardButton("🔎 Suhbat qurish"), KeyboardButton("💬 Suhbatni yopish"))
-    markup.row(KeyboardButton("ℹ️ Bot haqida"), KeyboardButton("📢 Kanaldan topish"))
-    if uid == ADMIN_ID:
-        markup.row(KeyboardButton("👤 Admin paneli"))
-    return markup
-
 # --- Admin paneli ---
 def admin_menu():
     m = InlineKeyboardMarkup()
@@ -89,7 +80,6 @@ def start(msg):
         bot.send_message(uid, "✅ Obuna bo‘ldingiz! Endi profilni to‘ldiring.", reply_markup=markup)
     else:
         bot.send_message(uid, "Asosiy menyu:", reply_markup=menu(uid))
-    bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
 
 # --- Profil handler ---
 @bot.message_handler(func=lambda m: True, content_types=["text", "photo"])
@@ -104,25 +94,25 @@ def profile_handler(msg):
         elif msg.text.lower() in ["ayol", "2"]:
             users[uid]["gender"] = "Ayol"
         else:
-            bot.send_message(uid, "Faqat 'Erkak' yoki 'Ayol' deb yozing.", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Faqat 'Erkak' yoki 'Ayol' deb yozing.")
             return
         users[uid]["step"] = "age"
-        bot.send_message(uid, "✅ Jins saqlandi. Endi yoshingizni kiriting:", reply_markup=get_bottom_menu(uid))
+        bot.send_message(uid, "✅ Jins saqlandi. Endi yoshingizni kiriting:")
 
     elif step == "age":
         if msg.text.isdigit():
             users[uid]["age"] = msg.text
             users[uid]["step"] = "photo"
-            bot.send_message(uid, "✅ Yosh saqlandi. Endi rasmingizni yuboring:", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "✅ Yosh saqlandi. Endi rasmingizni yuboring:")
         else:
-            bot.send_message(uid, "Iltimos, yoshni raqamda kiriting.", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Iltimos, yoshni raqamda kiriting.")
 
     elif step == "photo":
         if msg.content_type == "photo":
             file_id = msg.photo[-1].file_id
             users[uid]["photo"] = file_id
             users[uid]["step"] = "done"
-            bot.send_message(uid, "✅ Rasm qabul qilindi. Profilingiz to‘liq!", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "✅ Rasm qabul qilindi. Profilingiz to‘liq!")
 
             # Kanalga yuborish
             caption = f"👤 Yangi profil:\n👥 Jinsi: {users[uid]['gender']}\n🎂 Yosh: {users[uid]['age']}"
@@ -130,9 +120,9 @@ def profile_handler(msg):
             markup.add(InlineKeyboardButton("🔎 Suhbat qurish", callback_data="find"))
             bot.send_photo(CHANNELS[1], file_id, caption=caption, reply_markup=markup)
 
-            bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Profil kanalga yuborildi!", reply_markup=menu(uid))
         else:
-            bot.send_message(uid, "Iltimos, rasm yuboring.", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Iltimos, rasm yuboring.")
 
     elif uid in active:
         partner = active[uid]
@@ -140,46 +130,6 @@ def profile_handler(msg):
             bot.send_message(partner, msg.text)
         elif msg.content_type == "photo":
             bot.send_photo(partner, msg.photo[-1].file_id)
-
-# --- Pastki menyuni ishlov berish ---
-@bot.message_handler(func=lambda message: message.text in ["🔎 Suhbat qurish", "💬 Suhbatni yopish", "ℹ️ Bot haqida", "📢 Kanaldan topish", "👤 Admin paneli"])
-def handle_bottom_menu(message):
-    uid = message.from_user.id
-    text = message.text
-
-    if text == "🔎 Suhbat qurish":
-        if uid in active or uid in waiting:
-            bot.reply_to(message, "Siz allaqachon suhbatdasiz yoki kutyapsiz!")
-            return
-        waiting.append(uid)
-        bot.reply_to(message, "⏳ Suhbatdosh qidirilmoqda...")
-        if len(waiting) >= 2:
-            u1 = waiting.pop(0)
-            u2 = waiting.pop(0)
-            active[u1] = u2
-            active[u2] = u1
-            bot.send_message(u1, "✅ Suhbatdosh topildi!", reply_markup=get_bottom_menu(u1))
-            bot.send_message(u2, "✅ Suhbatdosh topildi!", reply_markup=get_bottom_menu(u2))
-
-    elif text == "💬 Suhbatni yopish":
-        if uid in active:
-            partner = active.pop(uid)
-            active.pop(partner, None)
-            bot.reply_to(message, "❌ Suhbat tugatildi.")
-            bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=get_bottom_menu(partner))
-        else:
-            bot.reply_to(message, "Siz hech kim bilan suhbatda emassiz.")
-
-    elif text == "ℹ️ Bot haqida":
-        bot.reply_to(message, "ℹ️ RandomChat bot — anonim suhbatlar uchun yaratilgan.")
-
-    elif text == "📢 Kanaldan topish":
-        bot.reply_to(message, f"📢 Suhbatdoshni kanal orqali toping: {CHANNELS[1]}")
-
-    elif text == "👤 Admin paneli" and uid == ADMIN_ID:
-        bot.reply_to(message, "Admin paneli:", reply_markup=admin_menu())
-    elif text == "👤 Admin paneli" and uid != ADMIN_ID:
-        bot.reply_to(message, "Siz admin emassiz!")
 
 # --- Callback handler ---
 @bot.callback_query_handler(func=lambda c: True)
@@ -190,27 +140,26 @@ def cb(call):
     if data == "check_subscription":
         if check_sub(uid):
             bot.edit_message_text("✅ Obuna tekshiruvi muvaffaqiyatli! Endi botdan foydalanishingiz mumkin.", chat_id=uid, message_id=call.message.message_id, reply_markup=menu(uid))
-            bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
         else:
             bot.answer_callback_query(call.id, "❌ Hali barcha kanallarga obuna bo'lmadingiz!")
 
     elif data == "fill_profile":
         users[uid]["step"] = "gender"
-        bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol", reply_markup=get_bottom_menu(uid))
+        bot.send_message(uid, "Profilingizni to‘ldiring.\nAvval jinsingizni tanlang: Erkak / Ayol", reply_markup=menu(uid))
 
     elif data == "find":
         if uid in active or uid in waiting:
             bot.answer_callback_query(call.id, "Siz allaqachon suhbatdasiz yoki kutyapsiz!")
             return
         waiting.append(uid)
-        bot.send_message(uid, "⏳ Suhbatdosh qidirilmoqda...", reply_markup=get_bottom_menu(uid))
+        bot.send_message(uid, "⏳ Suhbatdosh qidirilmoqda...", reply_markup=menu(uid))
         if len(waiting) >= 2:
             u1 = waiting.pop(0)
             u2 = waiting.pop(0)
             active[u1] = u2
             active[u2] = u1
-            bot.send_message(u1, "✅ Suhbatdosh topildi!", reply_markup=get_bottom_menu(u1))
-            bot.send_message(u2, "✅ Suhbatdosh topildi!", reply_markup=get_bottom_menu(u2))
+            bot.send_message(u1, "✅ Suhbatdosh topildi!", reply_markup=menu(u1))
+            bot.send_message(u2, "✅ Suhbatdosh topildi!", reply_markup=menu(u2))
 
     elif data == "stop":
         if uid in active:
@@ -222,33 +171,28 @@ def cb(call):
 
             bot.send_message(uid, "❌ Suhbat tugatildi.", reply_markup=markup)
             bot.send_message(partner, "❌ Suhbatdosh chiqib ketdi.", reply_markup=markup)
-            bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
-            bot.send_message(partner, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(partner))
         else:
             bot.send_message(uid, "Siz hech kim bilan suhbatda emassiz.", reply_markup=menu(uid))
-            bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
 
     elif data == "about":
-        bot.send_message(uid, "ℹ️ RandomChat bot — anonim suhbatlar uchun yaratilgan.", reply_markup=get_bottom_menu(uid))
+        bot.send_message(uid, "ℹ️ RandomChat bot — anonim suhbatlar uchun yaratilgan.", reply_markup=menu(uid))
 
     elif data == "channel_find":
-        bot.send_message(uid, f"📢 Suhbatdoshni kanal orqali toping: {CHANNELS[1]}", reply_markup=get_bottom_menu(uid))
+        bot.send_message(uid, f"📢 Suhbatdoshni kanal orqali toping: {CHANNELS[1]}", reply_markup=menu(uid))
 
     elif data == "admin_panel":
         if uid == ADMIN_ID:
             bot.send_message(uid, "Admin paneli:", reply_markup=admin_menu())
-            bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
         else:
             bot.answer_callback_query(call.id, "Siz admin emassiz!")
 
     elif data == "broadcast":
         if uid == ADMIN_ID:
-            bot.send_message(uid, "Xabarni kiriting:", reply_markup=get_bottom_menu(uid))
+            bot.send_message(uid, "Xabarni kiriting:", reply_markup=admin_menu())
             bot.register_next_step_handler(call.message, send_broadcast)
 
     elif data == "back_to_menu":
         bot.edit_message_text("Asosiy menyu:", chat_id=uid, message_id=call.message.message_id, reply_markup=menu(uid))
-        bot.send_message(uid, "Pastki menyuni ishlatishingiz mumkin:", reply_markup=get_bottom_menu(uid))
 
 # --- Broadcast funksiyasi ---
 def send_broadcast(msg):
@@ -258,7 +202,7 @@ def send_broadcast(msg):
             bot.send_message(user_id, text)
         except:
             continue
-    bot.send_message(msg.from_user.id, "✅ Xabar yuborildi!", reply_markup=get_bottom_menu(msg.from_user.id))
+    bot.send_message(msg.from_user.id, "✅ Xabar yuborildi!", reply_markup=menu(msg.from_user.id))
 
 # --- Run ---
 def run():
