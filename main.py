@@ -12,7 +12,7 @@ from aiohttp import web
 # ====== Config ======
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNELS = ["@shaxsiy_blog1o"]   # Majburiy obuna kanallari
-PROFILE_CHANNEL = "@anketaa_uz"   # Anketalar tashlanadigan kanal
+PROFILE_CHANNEL = "@anketaa_uz"  # Anketalar tashlanadigan kanal
 ADMIN_ID = int(os.getenv("ADMIN_ID", 6733100026))
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -56,9 +56,9 @@ async def is_subscribed(user_id):
 @dp.message(F.text == "/start")
 async def start_handler(message: Message, state: FSMContext):
     if not await is_subscribed(message.from_user.id):
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}")] for ch in CHANNELS
-        ])
+        markup = InlineKeyboardMarkup()
+        for ch in CHANNELS:
+            markup.add(InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}"))
         await message.answer("📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling!", reply_markup=markup)
         return
 
@@ -101,9 +101,9 @@ async def set_photo(message: Message, state: FSMContext):
     await state.clear()
 
     # Kanalga anketani yuborish
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")]
-    ])
+    markup = InlineKeyboardMarkup().add(
+        InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")
+    )
     await bot.send_photo(
         PROFILE_CHANNEL,
         photo=profiles[message.from_user.id]["photo"],
@@ -141,6 +141,43 @@ async def accept_chat(call: CallbackQuery):
 @dp.callback_query(F.data == "reject")
 async def reject_chat(call: CallbackQuery):
     await call.message.answer("❌ Siz suhbatni rad etdingiz.")
+
+# ====== Suhbatdosh topish ======
+@dp.callback_query(F.data == "find")
+async def find_partner(call: CallbackQuery):
+    user_id = call.from_user.id
+
+    if user_id in active:
+        await call.message.answer("⚠️ Siz allaqachon suhbatdasiz!")
+        return
+
+    if waiting and waiting[0] != user_id:
+        partner_id = waiting.pop(0)
+        active[user_id] = partner_id
+        active[partner_id] = user_id
+
+        await bot.send_message(user_id, "✅ Suhbat boshlandi!")
+        await bot.send_message(partner_id, "✅ Suhbat boshlandi!")
+    else:
+        waiting.append(user_id)
+        await call.message.answer("⌛ Suhbatdosh qidirilmoqda...")
+
+# ====== Suhbatni to‘xtatish ======
+@dp.callback_query(F.data == "stop")
+async def stop_chat(call: CallbackQuery):
+    user_id = call.from_user.id
+
+    if user_id not in active:
+        await call.message.answer("❌ Siz hozircha suhbatda emassiz.")
+        return
+
+    partner_id = active[user_id]
+    del active[user_id]
+    if partner_id in active:
+        del active[partner_id]
+
+    await bot.send_message(user_id, "🛑 Suhbat tugatildi.", reply_markup=main_menu())
+    await bot.send_message(partner_id, "🛑 Suhbat tugatildi.", reply_markup=main_menu())
 
 # ====== Xabarlarni uzatish ======
 @dp.message(F.text)
