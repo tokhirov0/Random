@@ -1,208 +1,209 @@
-import logging
 import os
-import threading
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-)
-from aiogram.filters import Command
-from dotenv import load_dotenv
-from flask import Flask
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
-# --- Flask ---
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "🤖 Bot ishlayapti!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-# --- Environment variables ---
-load_dotenv()
+# ====== Config ======
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-CHANNELS = [os.getenv("CHANNEL_1"), os.getenv("CHANNEL_2")]
-PROFILE_CHANNEL = os.getenv("PROFILE_CHANNEL")
+CHANNELS = ["@shaxsiy_blog1o"]   # Majburiy obuna kanallari
+PROFILE_CHANNEL = "@anketaa_uz"   # Anketalar tashlanadigan kanal
+ADMIN_ID = int(os.getenv("ADMIN_ID", 6733100026))
 
-# --- Bot ---
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
-# --- Database (oddiy xotirada) ---
-users = {}  # user_id: {"gender":..., "age":..., "photo":..., "profile_done":bool}
+# ====== Ma'lumotlar ======
+waiting = []
+active = {}
+profiles = {}   # user_id: {"gender":..., "age":..., "photo":...}
 
-# --- Menyular ---
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🗣️ Suhbat qurish")],
-        [KeyboardButton(text="🔍 Qidirish"), KeyboardButton(text="❌ Suhbatni yopish")],
-        [KeyboardButton(text="ℹ️ Bot haqida")],
-        [KeyboardButton(text="👨‍💻 Admin panel")]
-    ],
-    resize_keyboard=True
-)
+# ====== State-lar ======
+class ProfileState(StatesGroup):
+    gender = State()
+    age = State()
+    photo = State()
 
-admin_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📊 Statistika")],
-        [KeyboardButton(text="📢 Hammaga xabar yuborish")],
-        [KeyboardButton(text="⬅️ Orqaga")]
-    ],
-    resize_keyboard=True
-)
+# ====== Menyu ======
+def main_menu():
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Suhbatdosh topish", callback_data="find")],
+        [InlineKeyboardButton(text="🛑 Suhbatni to‘xtatish", callback_data="stop")],
+        [InlineKeyboardButton(text="🔍 Izlash", callback_data="search")],
+        [InlineKeyboardButton(text="ℹ️ Bot haqida", callback_data="about")],
+        [InlineKeyboardButton(text="⚙️ Admin panel", callback_data="admin")]
+    ])
+    return markup
 
-# --- Start ---
-@dp.message(Command("start"))
-async def start_cmd(message: Message):
-    user_id = message.from_user.id
-
-    # Majburiy obuna tekshirish
+# ====== Kanal obuna tekshiruvi ======
+async def is_subscribed(user_id):
     for channel in CHANNELS:
-        member = await bot.get_chat_member(channel, user_id)
-        if member.status == "left":
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="📢 Kanalga obuna bo‘lish", url=f"https://t.me/{channel.strip('@')}")],
-                    [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_subs")]
-                ]
-            )
-            await message.answer("❗ Davom etish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=kb)
-            return
+        try:
+            member = await bot.get_chat_member(channel, user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        except Exception:
+            return False
+    return True
 
-    # Profil to‘ldirish
-    if user_id not in users or not users[user_id].get("profile_done", False):
-        users[user_id] = {"profile_done": False}
-        await message.answer("👤 Avval profilni to‘ldiraylik.\n\n➡️ Avval jinsingizni kiriting (Erkak/Ayol).")
+# ====== Start ======
+@dp.message(F.text == "/start")
+async def start_handler(message: Message, state: FSMContext):
+    if not await is_subscribed(message.from_user.id):
+        markup = InlineKeyboardMarkup()
+        for ch in CHANNELS:
+            markup.add(InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}"))
+        await message.answer("📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling!", reply_markup=markup)
         return
 
-    # Agar profil tayyor bo‘lsa
-    await message.answer("🏠 Asosiy menyu", reply_markup=main_menu)
-
-# --- Obuna qayta tekshirish ---
-@dp.callback_query(F.data == "check_subs")
-async def check_subs(call: CallbackQuery):
-    user_id = call.from_user.id
-    for channel in CHANNELS:
-        member = await bot.get_chat_member(channel, user_id)
-        if member.status == "left":
-            await call.answer("⛔ Hali ham obuna bo‘lmadingiz!", show_alert=True)
-            return
-    await call.message.answer("✅ Obuna tekshirildi. Endi profilni to‘ldirishni boshlaymiz.\n\n➡️ Jinsingizni kiriting (Erkak/Ayol).")
-
-# --- Profil: jins ---
-@dp.message(F.text.in_(["Erkak", "Ayol"]))
-async def set_gender(message: Message):
-    user_id = message.from_user.id
-    if "gender" not in users[user_id]:
-        users[user_id]["gender"] = message.text
-        await message.answer("📅 Yoshingizni yozing (masalan: 20)")
+    if message.from_user.id not in profiles:
+        await message.answer("👤 Avval profil to‘ldiring.\n\nJinsingizni tanlang:", 
+                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                 [InlineKeyboardButton(text="👨 Erkak", callback_data="gender_male")],
+                                 [InlineKeyboardButton(text="👩 Ayol", callback_data="gender_female")]
+                             ]))
+        await state.set_state(ProfileState.gender)
     else:
-        await message.answer("✅ Siz allaqachon jinsni tanladingiz.")
+        await message.answer("Asosiy menyu:", reply_markup=main_menu())
 
-# --- Profil: yosh ---
-@dp.message(F.text.regexp(r"^\d{1,2}$"))
-async def set_age(message: Message):
-    user_id = message.from_user.id
-    if "age" not in users[user_id]:
-        users[user_id]["age"] = message.text
-        await message.answer("📸 Profil rasmingizni yuboring.")
-    else:
-        await message.answer("✅ Siz allaqachon yoshingizni kiritgansiz.")
+# ====== Profil to‘ldirish ======
+@dp.callback_query(F.data.startswith("gender_"))
+async def set_gender(call: CallbackQuery, state: FSMContext):
+    gender = "Erkak" if call.data == "gender_male" else "Ayol"
+    await state.update_data(gender=gender)
+    await call.message.answer("📅 Yoshingizni kiriting (faqat son):")
+    await state.set_state(ProfileState.age)
 
-# --- Profil: rasm ---
-@dp.message(F.photo)
-async def set_photo(message: Message):
-    user_id = message.from_user.id
-    if "photo" not in users[user_id]:
-        users[user_id]["photo"] = message.photo[-1].file_id
-        users[user_id]["profile_done"] = True
+@dp.message(ProfileState.age, F.text)
+async def set_age(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ Faqat son kiriting!")
+        return
+    await state.update_data(age=message.text)
+    await message.answer("📸 Iltimos, rasm yuboring:")
+    await state.set_state(ProfileState.photo)
 
-        # Kanalga yuborish
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="✉️ Suhbat qurish", callback_data=f"chat_{user_id}")]
-            ]
-        )
-        caption = f"👤 Yangi foydalanuvchi anketasi:\n\n👫 Jinsi: {users[user_id]['gender']}\n📅 Yoshi: {users[user_id]['age']}"
-        await bot.send_photo(PROFILE_CHANNEL, photo=users[user_id]["photo"], caption=caption, reply_markup=kb)
+@dp.message(ProfileState.photo, F.photo)
+async def set_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    profiles[message.from_user.id] = {
+        "gender": data["gender"],
+        "age": data["age"],
+        "photo": message.photo[-1].file_id
+    }
+    await message.answer("✅ Profil to‘ldirildi!\nEndi siz suhbat boshlashingiz mumkin.", reply_markup=main_menu())
+    await state.clear()
 
-        await message.answer("✅ Profil muvaffaqiyatli to‘ldirildi!", reply_markup=main_menu)
-    else:
-        await message.answer("✅ Siz allaqachon rasm yuborgansiz.")
+    # Kanalga anketani yuborish
+    markup = InlineKeyboardMarkup().add(
+        InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")
+    )
+    await bot.send_photo(
+        PROFILE_CHANNEL,
+        photo=profiles[message.from_user.id]["photo"],
+        caption=f"👤 Yangi anketa\n\nJins: {profiles[message.from_user.id]['gender']}\nYosh: {profiles[message.from_user.id]['age']}",
+        reply_markup=markup
+    )
 
-# --- Kanal anketasidan bosilganda ---
-@dp.callback_query(F.data.regexp(r"^chat_\d+$"))
+# ====== Kanal orqali suhbat ======
+@dp.callback_query(F.data.startswith("chat_"))
 async def start_chat_request(call: CallbackQuery):
     target_id = int(call.data.split("_")[1])
-    requester_id = call.from_user.id
+    requester = call.from_user.id
 
-    if target_id == requester_id:
-        await call.answer("❗ O‘zingiz bilan suhbat qura olmaysiz.", show_alert=True)
+    if target_id not in profiles:
+        await call.message.answer("❌ Ushbu foydalanuvchi mavjud emas.")
         return
 
-    await bot.send_message(target_id, "💌 Kimdir siz bilan suhbat qurmoqchi. Qabul qilasizmi?")
-    await call.message.answer("✅ So‘rov yuborildi. Javobini kuting.")
+    await bot.send_message(target_id, "💬 Kimdir siz bilan suhbat qurmoqchi. Qabul qilasizmi?",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                               [InlineKeyboardButton(text="✅ Ha", callback_data=f"accept_{requester}")],
+                               [InlineKeyboardButton(text="❌ Yo‘q", callback_data="reject")]
+                           ]))
 
-# --- Admin panel ---
-@dp.message(F.text == "👨‍💻 Admin panel")
-async def admin_panel(message: Message):
-    if message.from_user.id == ADMIN_ID:
-        await message.answer("🔐 Admin paneli:", reply_markup=admin_menu)
+@dp.callback_query(F.data.startswith("accept_"))
+async def accept_chat(call: CallbackQuery):
+    partner_id = int(call.data.split("_")[1])
+    user_id = call.from_user.id
+
+    active[user_id] = partner_id
+    active[partner_id] = user_id
+
+    await bot.send_message(user_id, "✅ Suhbat boshlandi!")
+    await bot.send_message(partner_id, "✅ Suhbat boshlandi!")
+
+@dp.callback_query(F.data == "reject")
+async def reject_chat(call: CallbackQuery):
+    await call.message.answer("❌ Siz suhbatni rad etdingiz.")
+
+# ====== Xabarlarni uzatish ======
+@dp.message(F.text)
+async def relay_message(message: Message):
+    user_id = message.from_user.id
+    if user_id in active:
+        partner_id = active[user_id]
+        try:
+            await bot.send_message(partner_id, message.text)
+        except:
+            await message.answer("⚠️ Xabar yuborilmadi.")
     else:
-        await message.answer("⛔ Siz admin emassiz.")
+        await message.answer("Siz hozircha suhbatda emassiz.", reply_markup=main_menu())
 
-# --- Statistika ---
-@dp.message(F.text == "📊 Statistika")
-async def show_stats(message: Message):
-    if message.from_user.id == ADMIN_ID:
-        await message.answer(f"📊 Umumiy foydalanuvchilar: {len(users)} ta")
-    else:
-        await message.answer("⛔ Siz admin emassiz.")
+# ====== Admin panel ======
+@dp.callback_query(F.data == "admin")
+async def admin_panel(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        await call.message.answer("❌ Siz admin emassiz!")
+        return
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Statistika", callback_data="stats")],
+        [InlineKeyboardButton(text="📢 Hammaga xabar", callback_data="broadcast")]
+    ])
+    await call.message.answer("⚙️ Admin panel:", reply_markup=markup)
 
-# --- Hammaga xabar ---
-@dp.message(F.text == "📢 Hammaga xabar yuborish")
-async def ask_broadcast(message: Message):
-    if message.from_user.id == ADMIN_ID:
-        await message.answer("✍️ Xabaringizni yozing:")
-        dp.message.register(broadcast_message, F.text)
+@dp.callback_query(F.data == "stats")
+async def stats(call: CallbackQuery):
+    if call.from_user.id == ADMIN_ID:
+        await call.message.answer(f"👥 Umumiy foydalanuvchilar: {len(profiles)}")
 
+@dp.callback_query(F.data == "broadcast")
+async def broadcast_start(call: CallbackQuery):
+    if call.from_user.id == ADMIN_ID:
+        await call.message.answer("📢 Hammaga yuboriladigan xabarni kiriting:")
+
+@dp.message(F.text, F.from_user.id == ADMIN_ID)
 async def broadcast_message(message: Message):
-    if message.from_user.id == ADMIN_ID:
-        text = message.text
-        count = 0
-        for user_id in users.keys():
-            try:
-                await bot.send_message(user_id, f"📢 Admin xabari:\n\n{text}")
-                count += 1
-            except:
-                pass
-        await message.answer(f"✅ Xabar {count} ta foydalanuvchiga yuborildi.", reply_markup=admin_menu)
+    if message.text.startswith("/"): return
+    count = 0
+    for user_id in profiles.keys():
+        try:
+            await bot.send_message(user_id, f"📢 Admin xabari:\n\n{message.text}")
+            count += 1
+        except:
+            pass
+    await message.answer(f"✅ {count} ta foydalanuvchiga yuborildi.")
 
-# --- Orqaga ---
-@dp.message(F.text == "⬅️ Orqaga")
-async def back_main(message: Message):
-    await message.answer("🏠 Asosiy menyu", reply_markup=main_menu)
+# ====== Webhook sozlash ======
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
 
-# --- Oddiy menyular ---
-@dp.message(F.text == "ℹ️ Bot haqida")
-async def about(message: Message):
-    await message.answer("ℹ️ Bu bot anonim suhbat va tanishuvlar uchun mo‘ljallangan.")
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
 
-@dp.message(F.text == "❌ Suhbatni yopish")
-async def close_chat(message: Message):
-    await message.answer("❌ Suhbat yopildi.")
+async def on_shutdown(app):
+    await bot.delete_webhook()
 
-# --- Run ---
+def main():
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    # Flaskni alohida oqimda ishlatish
-    t = threading.Thread(target=run_flask)
-    t.start()
-
-    # Bot polling
-    dp.run_polling(bot)
+    main()
