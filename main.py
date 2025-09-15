@@ -57,9 +57,75 @@ async def is_subscribed(user_id):
             return False
     return True
 
-# ====== Handlers (profil, chat, admin, broadcast va h.k.) ======
-# Shu yerga sizning barcha callback va message handler-lar bo‘ladi
-# (Avvalgi polling kodidan olingan, faqat polling o‘rniga webhook ishlatiladi)
+# ====== Start ======
+@dp.message(types.filters.Text(equals="/start"))
+async def start_handler(message: types.Message):
+    if not await is_subscribed(message.from_user.id):
+        markup = types.InlineKeyboardMarkup()
+        for ch in CHANNELS:
+            markup.add(types.InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}"))
+        await message.answer("📢 Botdan foydalanish uchun barcha kanallarga obuna bo‘ling!", reply_markup=markup)
+        return
+    await message.answer("Asosiy menyu:", reply_markup=main_menu())
+
+# ====== Profil to‘ldirish ======
+@dp.callback_query(types.filters.Text(equals="profile"))
+async def profile_start(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer("👤 Ismingizni kiriting:")
+    await state.set_state(ProfileState.name)
+
+@dp.message(ProfileState.name, types.filters.Text())
+async def set_name(message: types.Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    markup = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="👨 Erkak", callback_data="gender_male")],
+        [types.InlineKeyboardButton(text="👩 Ayol", callback_data="gender_female")]
+    ])
+    await message.answer("Jinsingizni tanlang:", reply_markup=markup)
+    await state.set_state(ProfileState.gender)
+
+@dp.callback_query(types.filters.Text(startswith="gender_"))
+async def set_gender(call: types.CallbackQuery, state: FSMContext):
+    gender = "Erkak" if call.data == "gender_male" else "Ayol"
+    await state.update_data(gender=gender)
+    await call.message.answer("📅 Yoshingizni kiriting (faqat son):")
+    await state.set_state(ProfileState.age)
+
+@dp.message(ProfileState.age, types.filters.Text())
+async def set_age(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ Faqat son kiriting!")
+        return
+    await state.update_data(age=message.text)
+    await message.answer("📸 Rasm yuboring:")
+    await state.set_state(ProfileState.photo)
+
+@dp.message(ProfileState.photo, types.filters.Photo())
+async def set_photo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    profiles[message.from_user.id] = {
+        "name": data["name"],
+        "gender": data["gender"],
+        "age": data["age"],
+        "photo": message.photo[-1].file_id
+    }
+    await message.answer("✅ Profil saqlandi!", reply_markup=main_menu())
+    await state.clear()
+
+    markup = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")
+    )
+    await bot.send_photo(
+        PROFILE_CHANNEL,
+        photo=profiles[message.from_user.id]["photo"],
+        caption=f"👤 {profiles[message.from_user.id]['name']}\n"
+                f"Jins: {profiles[message.from_user.id]['gender']}\n"
+                f"Yosh: {profiles[message.from_user.id]['age']}",
+        reply_markup=markup
+    )
+
+# ====== Shu yerga boshqa barcha callback va message handler-lar (chat, admin, broadcast) ======
+# Polling handlerlar webhook bilan ishlash uchun moslashtiriladi
 
 # ====== Webhook sozlash ======
 async def on_startup(dp):
