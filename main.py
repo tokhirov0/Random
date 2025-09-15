@@ -5,17 +5,14 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiohttp import web
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.client.default import DefaultBotProperties
+import asyncio
 
 # ====== Config ======
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 6733100026))
 CHANNELS = ["@shaxsiy_blog1o"]
 PROFILE_CHANNEL = "@anketaa_uz"
-PORT = int(os.getenv("PORT", 10000))
-RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME", "")
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
@@ -248,24 +245,6 @@ async def broadcast_start(call: CallbackQuery):
         broadcast_mode = True
         await call.message.answer("📢 Hammaga yuboriladigan xabarni kiriting:")
 
-# ====== Webhook ======
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"https://{RENDER_HOST}{WEBHOOK_PATH}" if RENDER_HOST else ""
-
-async def on_startup(bot: Bot):
-    if WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(bot: Bot):
-    await bot.delete_webhook()
-    await bot.session.close()
-
-# ====== App ishga tushurish ======
-app = web.Application()
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-setup_application(app, dp, bot=bot)
-app.on_startup.append(lambda _: on_startup(bot))
-app.on_shutdown.append(lambda _: on_shutdown(bot))
-
+# ====== Ishga tushirish ======
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=PORT)
+    asyncio.run(dp.start_polling(bot))
