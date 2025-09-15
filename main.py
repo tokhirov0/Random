@@ -1,28 +1,41 @@
 import logging
 import os
+import threading
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton, 
+    Message, ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
 from aiogram.filters import Command
 from dotenv import load_dotenv
+from flask import Flask
 
-# .env fayldan o'qish
+# --- Flask ---
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "🤖 Bot ishlayapti!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# --- Environment variables ---
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-CHANNELS = [os.getenv("CHANNEL_1"), os.getenv("CHANNEL_2")]  # majburiy kanallar
-PROFILE_CHANNEL = os.getenv("PROFILE_CHANNEL")  # anketalar yuboriladigan kanal
+CHANNELS = [os.getenv("CHANNEL_1"), os.getenv("CHANNEL_2")]
+PROFILE_CHANNEL = os.getenv("PROFILE_CHANNEL")
 
-# Bot va Dispatcher
+# --- Bot ---
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Foydalanuvchilar bazasi
+# --- Database (oddiy xotirada) ---
 users = {}  # user_id: {"gender":..., "age":..., "photo":..., "profile_done":bool}
 
-# Menyular
+# --- Menyular ---
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗣️ Suhbat qurish")],
@@ -42,12 +55,12 @@ admin_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# /start komandasi
+# --- Start ---
 @dp.message(Command("start"))
 async def start_cmd(message: Message):
     user_id = message.from_user.id
 
-    # Kanal obunasini tekshirish
+    # Majburiy obuna tekshirish
     for channel in CHANNELS:
         member = await bot.get_chat_member(channel, user_id)
         if member.status == "left":
@@ -69,7 +82,7 @@ async def start_cmd(message: Message):
     # Agar profil tayyor bo‘lsa
     await message.answer("🏠 Asosiy menyu", reply_markup=main_menu)
 
-# Obunani qayta tekshirish
+# --- Obuna qayta tekshirish ---
 @dp.callback_query(F.data == "check_subs")
 async def check_subs(call: CallbackQuery):
     user_id = call.from_user.id
@@ -80,7 +93,7 @@ async def check_subs(call: CallbackQuery):
             return
     await call.message.answer("✅ Obuna tekshirildi. Endi profilni to‘ldirishni boshlaymiz.\n\n➡️ Jinsingizni kiriting (Erkak/Ayol).")
 
-# Profil — jins
+# --- Profil: jins ---
 @dp.message(F.text.in_(["Erkak", "Ayol"]))
 async def set_gender(message: Message):
     user_id = message.from_user.id
@@ -90,7 +103,7 @@ async def set_gender(message: Message):
     else:
         await message.answer("✅ Siz allaqachon jinsni tanladingiz.")
 
-# Profil — yosh
+# --- Profil: yosh ---
 @dp.message(F.text.regexp(r"^\d{1,2}$"))
 async def set_age(message: Message):
     user_id = message.from_user.id
@@ -100,7 +113,7 @@ async def set_age(message: Message):
     else:
         await message.answer("✅ Siz allaqachon yoshingizni kiritgansiz.")
 
-# Profil — rasm
+# --- Profil: rasm ---
 @dp.message(F.photo)
 async def set_photo(message: Message):
     user_id = message.from_user.id
@@ -121,7 +134,7 @@ async def set_photo(message: Message):
     else:
         await message.answer("✅ Siz allaqachon rasm yuborgansiz.")
 
-# Kanal anketasidan bosilganda
+# --- Kanal anketasidan bosilganda ---
 @dp.callback_query(F.data.regexp(r"^chat_\d+$"))
 async def start_chat_request(call: CallbackQuery):
     target_id = int(call.data.split("_")[1])
@@ -134,7 +147,7 @@ async def start_chat_request(call: CallbackQuery):
     await bot.send_message(target_id, "💌 Kimdir siz bilan suhbat qurmoqchi. Qabul qilasizmi?")
     await call.message.answer("✅ So‘rov yuborildi. Javobini kuting.")
 
-# Admin panel
+# --- Admin panel ---
 @dp.message(F.text == "👨‍💻 Admin panel")
 async def admin_panel(message: Message):
     if message.from_user.id == ADMIN_ID:
@@ -142,7 +155,7 @@ async def admin_panel(message: Message):
     else:
         await message.answer("⛔ Siz admin emassiz.")
 
-# Statistika
+# --- Statistika ---
 @dp.message(F.text == "📊 Statistika")
 async def show_stats(message: Message):
     if message.from_user.id == ADMIN_ID:
@@ -150,7 +163,7 @@ async def show_stats(message: Message):
     else:
         await message.answer("⛔ Siz admin emassiz.")
 
-# Hammaga xabar
+# --- Hammaga xabar ---
 @dp.message(F.text == "📢 Hammaga xabar yuborish")
 async def ask_broadcast(message: Message):
     if message.from_user.id == ADMIN_ID:
@@ -169,12 +182,12 @@ async def broadcast_message(message: Message):
                 pass
         await message.answer(f"✅ Xabar {count} ta foydalanuvchiga yuborildi.", reply_markup=admin_menu)
 
-# Orqaga
+# --- Orqaga ---
 @dp.message(F.text == "⬅️ Orqaga")
 async def back_main(message: Message):
     await message.answer("🏠 Asosiy menyu", reply_markup=main_menu)
 
-# Oddiy menyular
+# --- Oddiy menyular ---
 @dp.message(F.text == "ℹ️ Bot haqida")
 async def about(message: Message):
     await message.answer("ℹ️ Bu bot anonim suhbat va tanishuvlar uchun mo‘ljallangan.")
@@ -183,6 +196,13 @@ async def about(message: Message):
 async def close_chat(message: Message):
     await message.answer("❌ Suhbat yopildi.")
 
+# --- Run ---
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+
+    # Flaskni alohida oqimda ishlatish
+    t = threading.Thread(target=run_flask)
+    t.start()
+
+    # Bot polling
     dp.run_polling(bot)
