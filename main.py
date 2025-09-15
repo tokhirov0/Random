@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.client.default import DefaultBotProperties
 
 # ====== Config ======
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -15,7 +16,10 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 6733100026))
 CHANNELS = ["@shaxsiy_blog1o"]
 PROFILE_CHANNEL = "@anketaa_uz"
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher(storage=MemoryStorage())
 
 # ====== Ma'lumotlar ======
