@@ -5,6 +5,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
@@ -14,13 +15,14 @@ CHANNELS = ["@shaxsiy_blog1o"]   # Majburiy obuna kanallari
 PROFILE_CHANNEL = "@anketaa_uz"   # Anketalar tashlanadigan kanal
 ADMIN_ID = int(os.getenv("ADMIN_ID", 6733100026))
 
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
 # ====== Ma'lumotlar ======
 waiting = []
 active = {}
 profiles = {}   # user_id: {"gender":..., "age":..., "photo":...}
+broadcast_mode = False
 
 # ====== State-lar ======
 class ProfileState(StatesGroup):
@@ -143,7 +145,24 @@ async def reject_chat(call: CallbackQuery):
 # ====== Xabarlarni uzatish ======
 @dp.message(F.text)
 async def relay_message(message: Message):
+    global broadcast_mode
+
     user_id = message.from_user.id
+
+    # Admin broadcast rejimida
+    if broadcast_mode and user_id == ADMIN_ID:
+        count = 0
+        for uid in profiles.keys():
+            try:
+                await bot.send_message(uid, f"📢 Admin xabari:\n\n{message.text}")
+                count += 1
+            except:
+                pass
+        await message.answer(f"✅ {count} ta foydalanuvchiga yuborildi.")
+        broadcast_mode = False
+        return
+
+    # Oddiy foydalanuvchi xabarlari
     if user_id in active:
         partner_id = active[user_id]
         try:
@@ -172,20 +191,10 @@ async def stats(call: CallbackQuery):
 
 @dp.callback_query(F.data == "broadcast")
 async def broadcast_start(call: CallbackQuery):
+    global broadcast_mode
     if call.from_user.id == ADMIN_ID:
+        broadcast_mode = True
         await call.message.answer("📢 Hammaga yuboriladigan xabarni kiriting:")
-
-@dp.message(F.text, F.from_user.id == ADMIN_ID)
-async def broadcast_message(message: Message):
-    if message.text.startswith("/"): return
-    count = 0
-    for user_id in profiles.keys():
-        try:
-            await bot.send_message(user_id, f"📢 Admin xabari:\n\n{message.text}")
-            count += 1
-        except:
-            pass
-    await message.answer(f"✅ {count} ta foydalanuvchiga yuborildi.")
 
 # ====== Webhook sozlash ======
 WEBHOOK_PATH = "/webhook"
