@@ -56,9 +56,9 @@ async def is_subscribed(user_id):
 @dp.message(F.text == "/start")
 async def start_handler(message: Message, state: FSMContext):
     if not await is_subscribed(message.from_user.id):
-        markup = InlineKeyboardMarkup()
-        for ch in CHANNELS:
-            markup.add(InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}"))
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"Obuna bo‘lish ({ch})", url=f"https://t.me/{ch.lstrip('@')}")] for ch in CHANNELS
+        ])
         await message.answer("📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling!", reply_markup=markup)
         return
 
@@ -101,9 +101,9 @@ async def set_photo(message: Message, state: FSMContext):
     await state.clear()
 
     # Kanalga anketani yuborish
-    markup = InlineKeyboardMarkup().add(
-        InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{message.from_user.id}")]
+    ])
     await bot.send_photo(
         PROFILE_CHANNEL,
         photo=profiles[message.from_user.id]["photo"],
