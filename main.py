@@ -1,207 +1,190 @@
-import logging
-import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+import os
+import threading
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from flask import Flask
 
-TOKEN = "8309762183:AAF8gEz6C6w7XpKUsy_U2yqi6kBqhG-gohE"
-ADMIN_ID = 6733100026
-CHANNELS = ["@anketaa_uz", "@shaxsiy_blog1o"]
+# --- Environment Variables ---
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+CHANNELS = os.getenv("CHANNELS", "").split(",")  # '@anketaa_uz,@shaxsiy_blog1o'
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-logging.basicConfig(level=logging.INFO)
-
-# Userlar bazasi (oddiy dict orqali)
-users = {}
+bot = telebot.TeleBot(TOKEN)
+waiting = []
+active = {}
 profiles = {}
-waiting = set()
-active_chats = {}
+users = set()
 
-# ======= Kanal tekshiruvi =======
-async def check_sub(user_id):
-    for ch in CHANNELS:
-        chat = await bot.get_chat_member(ch, user_id)
-        if chat.status == "left":
-            return False
-    return True
+# --- Flask (Render portni talab qiladi) ---
+app = Flask(__name__)
 
-def sub_buttons():
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Kanalga obuna boʻlish", url=f"https://t.me/{ch[1:]}")] for ch in CHANNELS
-    ] + [[InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")]])
-    return kb
+@app.route("/")
+def home():
+    return "RandomChat Bot is running on Render!"
 
-# ======= Start =======
-@dp.message(Command("start"))
-async def start_cmd(message: types.Message):
-    if not await check_sub(message.from_user.id):
-        await message.answer("❗️ Botdan foydalanish uchun kanallarga obuna boʻling:", reply_markup=sub_buttons())
+# --- Asosiy menyu ---
+def main_menu(user_id=None):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔎 Suhbatdosh topish", callback_data="find"),
+        InlineKeyboardButton("🛑 Suhbatni to'xtatish", callback_data="stop"),
+        InlineKeyboardButton("ℹ️ Bot haqida", callback_data="about"),
+    )
+    if user_id == ADMIN_ID:  # faqat admin ko‘radi
+        markup.add(InlineKeyboardButton("⚙️ Admin panel", callback_data="admin"))
+    return markup
+
+# --- Kanal obunasi tekshirish ---
+def is_subscribed(user_id):
+    try:
+        for channel in CHANNELS:
+            if not channel:
+                continue
+            member = bot.get_chat_member(channel.strip(), user_id)
+            if member.status in ['member', 'administrator', 'creator']:
+                continue
+            else:
+                return False
+        return True
+    except Exception:
+        return False
+
+# --- Start komandasi ---
+@bot.message_handler(commands=['start'])
+def start_handler(message):
+    user_id = message.from_user.id
+    users.add(user_id)
+
+    if not is_subscribed(user_id):
+        markup = InlineKeyboardMarkup()
+        for channel in CHANNELS:
+            if channel:
+                markup.add(InlineKeyboardButton(f"📢 {channel}", url=f"https://t.me/{channel.lstrip('@')}"))
+        bot.send_message(user_id, "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:", reply_markup=markup)
         return
-    if message.from_user.id not in profiles:
-        await message.answer("👤 Profilingizni toʻldiring.\n\nIsmingizni yuboring:")
-        users[message.from_user.id] = {"step": "name"}
-    else:
-        await message.answer("🔹 Siz allaqachon roʻyxatdan oʻtgansiz!", reply_markup=main_menu())
 
-# ======= Callback check_sub =======
-@dp.callback_query(lambda c: c.data == "check_sub")
-async def check_subscription(callback: types.CallbackQuery):
-    if await check_sub(callback.from_user.id):
-        await callback.message.answer("✅ Obuna tasdiqlandi. Endi profilni toʻldiring.\n\nIsmingizni yuboring:")
-        users[callback.from_user.id] = {"step": "name"}
+    # Profil ma’lumotlari yo‘q bo‘lsa, to‘ldirishni so‘raymiz
+    if user_id not in profiles:
+        bot.send_message(user_id, "👤 Avval profil ma’lumotlaringizni to‘ldiring.")
+        bot.send_message(user_id, "Jinsingizni kiriting (Erkak/Ayol):")
+        bot.register_next_step_handler(message, process_gender)
     else:
-        await callback.message.answer("❗️ Obuna boʻlmagansiz!", reply_markup=sub_buttons())
+        bot.send_message(user_id, "Assalomu alaykum! Xush kelibsiz!\nQuyidagi menyudan foydalaning 👇", reply_markup=main_menu(user_id))
 
-# ======= Profil toʻldirish =======
-@dp.message()
-async def profile_handler(message: types.Message):
+# --- Profil to‘ldirish ---
+def process_gender(message):
     user_id = message.from_user.id
-    if user_id in users:
-        step = users[user_id]["step"]
+    gender = message.text.strip().lower()
+    profiles[user_id] = {"gender": gender}
+    bot.send_message(user_id, "✍️ Yoshingizni kiriting:")
+    bot.register_next_step_handler(message, process_age)
 
-        if step == "name":
-            users[user_id]["name"] = message.text
-            users[user_id]["step"] = "gender"
-            await message.answer("👫 Jinsingizni tanlang:", reply_markup=gender_kb())
+def process_age(message):
+    user_id = message.from_user.id
+    age = message.text.strip()
+    profiles[user_id]["age"] = age
+    bot.send_message(user_id, "📸 Rasm yuboring:")
+    bot.register_next_step_handler(message, process_photo)
 
-        elif step == "gender":
-            if message.text not in ["Erkak", "Ayol"]:
-                await message.answer("❗️ Faqat 'Erkak' yoki 'Ayol' deb yuboring")
-                return
-            users[user_id]["gender"] = message.text
-            users[user_id]["step"] = "age"
-            await message.answer("📅 Yosh kiriting:")
-
-        elif step == "age":
-            if not message.text.isdigit():
-                await message.answer("❗️ Yosh faqat son boʻlishi kerak")
-                return
-            users[user_id]["age"] = message.text
-            users[user_id]["step"] = "photo"
-            await message.answer("📸 Profil rasmingizni yuboring:")
-
-        elif step == "photo":
-            if not message.photo:
-                await message.answer("❗️ Rasm yuboring")
-                return
-            photo_id = message.photo[-1].file_id
-            profiles[user_id] = {
-                "name": users[user_id]["name"],
-                "gender": users[user_id]["gender"],
-                "age": users[user_id]["age"],
-                "photo": photo_id
-            }
-            del users[user_id]
-            await message.answer("✅ Profilingiz saqlandi!", reply_markup=main_menu())
-
-            # Kanalga chiqarish
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Suhbat qurish", callback_data=f"chat_{user_id}")]
-            ])
-            await bot.send_photo(CHANNELS[0], photo=photo_id,
-                                 caption=f"👤 {profiles[user_id]['name']}\n"
-                                         f"🧑‍🦱 Jins: {profiles[user_id]['gender']}\n"
-                                         f"📅 Yosh: {profiles[user_id]['age']}",
-                                 reply_markup=kb)
-
-# ======= Inline chat bosilganda =======
-@dp.callback_query(lambda c: c.data.startswith("chat_"))
-async def request_chat(callback: types.CallbackQuery):
-    target_id = int(callback.data.split("_")[1])
-    from_id = callback.from_user.id
-    if target_id not in profiles:
-        await callback.answer("❗️ Foydalanuvchi mavjud emas", show_alert=True)
+def process_photo(message):
+    user_id = message.from_user.id
+    if not message.photo:
+        bot.send_message(user_id, "❌ Rasm yuboring!")
         return
-    await bot.send_message(target_id, f"📩 Siz bilan {callback.from_user.full_name} suhbat qurmoqchi.\n"
-                                      f"✅ Qabul qilish uchun /accept yuboring.")
-    users[target_id] = {"step": "accept", "partner": from_id}
-    await callback.answer("✅ Soʻrov yuborildi", show_alert=True)
+    photo_id = message.photo[-1].file_id
+    profiles[user_id]["photo"] = photo_id
 
-# ======= Accept =======
-@dp.message(Command("accept"))
-async def accept_chat(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in users and users[user_id]["step"] == "accept":
-        partner = users[user_id]["partner"]
-        active_chats[user_id] = partner
-        active_chats[partner] = user_id
-        await bot.send_message(user_id, "✅ Suhbat boshlandi!\n❌ Tugatish uchun /stop")
-        await bot.send_message(partner, "✅ Suhbat boshlandi!\n❌ Tugatish uchun /stop")
-        del users[user_id]
+    # Kanalga anketa yuboriladi
+    caption = f"👤 Yangi anketa:\n\n👥 Jinsi: {profiles[user_id]['gender']}\n🎂 Yoshi: {profiles[user_id]['age']}"
+    for channel in CHANNELS:
+        if channel:
+            bot.send_photo(channel, photo_id, caption=caption)
 
-# ======= Stop =======
-@dp.message(Command("stop"))
-async def stop_chat(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in active_chats:
-        partner = active_chats[user_id]
-        await bot.send_message(partner, "❌ Suhbat tugadi")
-        await bot.send_message(user_id, "❌ Suhbat tugadi")
-        del active_chats[partner]
-        del active_chats[user_id]
+    bot.send_message(user_id, "✅ Profilingiz saqlandi!", reply_markup=main_menu(user_id))
 
-# ======= Forward messages in chat =======
-@dp.message()
-async def chat_forward(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in active_chats:
-        partner = active_chats[user_id]
-        if message.text:
-            await bot.send_message(partner, message.text)
-        elif message.photo:
-            await bot.send_photo(partner, message.photo[-1].file_id, caption=message.caption if message.caption else "")
+# --- Callback tugmalar ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    user_id = call.from_user.id
 
-# ======= Admin panel =======
-@dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
+    if call.data == "find":
+        if user_id in waiting or user_id in active:
+            bot.answer_callback_query(call.id, "Siz allaqachon navbattasiz yoki suhbatdasiz!")
+            return
+        waiting.append(user_id)
+        bot.send_message(user_id, "⏳ Siz navbatga qo‘shildingiz. Suhbatdosh topilmoqda...")
+
+        if len(waiting) >= 2:
+            user1 = waiting.pop(0)
+            user2 = waiting.pop(0)
+            active[user1] = user2
+            active[user2] = user1
+            bot.send_message(user1, "✅ Suhbatdosh topildi! Suhbatni boshlang.")
+            bot.send_message(user2, "✅ Suhbatdosh topildi! Suhbatni boshlang.")
+
+    elif call.data == "stop":
+        if user_id in active:
+            partner_id = active.pop(user_id)
+            active.pop(partner_id, None)
+            bot.send_message(user_id, "❌ Suhbat to‘xtatildi.", reply_markup=main_menu(user_id))
+            bot.send_message(partner_id, "❌ Suhbatdosh suhbatni to‘xtatdi.", reply_markup=main_menu(partner_id))
+        else:
+            bot.send_message(user_id, "Siz hozircha hech kim bilan suhbatda emassiz.", reply_markup=main_menu(user_id))
+
+    elif call.data == "about":
+        bot.send_message(user_id, "🤖 Bu anonim RandomChat bot.\n👥 Suhbatdoshingizni topib, bemalol muloqot qiling!")
+
+    elif call.data == "admin" and user_id == ADMIN_ID:
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("📊 Statistika", callback_data="stats"),
+            InlineKeyboardButton("📢 Hamma foydalanuvchilarga xabar yuborish", callback_data="broadcast")
+        )
+        bot.send_message(user_id, "⚙️ Admin paneliga xush kelibsiz:", reply_markup=markup)
+
+    elif call.data == "stats" and user_id == ADMIN_ID:
+        bot.send_message(user_id, f"📊 Bot foydalanuvchilari soni: {len(users)} ta")
+
+    elif call.data == "broadcast" and user_id == ADMIN_ID:
+        bot.send_message(user_id, "✍️ Hamma foydalanuvchilarga yuboriladigan xabar matnini yozing:")
+        bot.register_next_step_handler(call.message, process_broadcast)
+
+# --- Admin broadcast ---
+def process_broadcast(message):
     if message.from_user.id != ADMIN_ID:
         return
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📢 Xabar yuborish")]
-    ], resize_keyboard=True)
-    await message.answer("⚙️ Admin panel", reply_markup=kb)
+    text = message.text
+    count = 0
+    for user_id in list(users):
+        try:
+            bot.send_message(user_id, text)
+            count += 1
+        except:
+            pass
+    bot.send_message(ADMIN_ID, f"📢 Xabar {count} ta foydalanuvchiga yuborildi.")
 
-@dp.message(lambda m: m.text == "📊 Statistika" and m.from_user.id == ADMIN_ID)
-async def stats(message: types.Message):
-    await message.answer(f"👥 Foydalanuvchilar soni: {len(profiles)}")
+# --- Xabarlarni uzatish ---
+@bot.message_handler(func=lambda message: True, content_types=['text', 'photo'])
+def relay_message(message):
+    user_id = message.from_user.id
+    if user_id in active:
+        partner_id = active[user_id]
+        try:
+            if message.text:
+                bot.send_message(partner_id, message.text)
+            elif message.photo:
+                bot.send_photo(partner_id, message.photo[-1].file_id, caption=message.caption or "")
+        except Exception:
+            bot.send_message(user_id, "⚠️ Xabar yuborib bo‘lmadi.")
+    else:
+        bot.send_message(user_id, "Siz hozircha suhbatda emassiz.\nSuhbatdosh topish uchun tugmani bosing.", reply_markup=main_menu(user_id))
 
-@dp.message(lambda m: m.text == "📢 Xabar yuborish" and m.from_user.id == ADMIN_ID)
-async def broadcast_start(message: types.Message):
-    users[message.from_user.id] = {"step": "broadcast"}
-    await message.answer("✍️ Xabar matnini yuboring:")
-
-@dp.message()
-async def broadcast(message: types.Message):
-    if message.from_user.id in users and users[message.from_user.id]["step"] == "broadcast":
-        for uid in profiles.keys():
-            try:
-                await bot.send_message(uid, message.text)
-            except:
-                pass
-        await message.answer("✅ Xabar yuborildi")
-        del users[message.from_user.id]
-
-# ======= Helper menu =======
-def main_menu():
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🔍 Qidirish")],
-        [KeyboardButton(text="💬 Suhbat qurish"), KeyboardButton(text="❌ Suhbatni yopish")],
-        [KeyboardButton(text="ℹ️ Bot haqida")]
-    ], resize_keyboard=True)
-    return kb
-
-def gender_kb():
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="Erkak"), KeyboardButton(text="Ayol")]
-    ], resize_keyboard=True)
-    return kb
-
-# ======= Run =======
-async def main():
-    await dp.start_polling(bot)
+# --- Botni boshqa oqimda ishga tushirish ---
+def run_bot():
+    bot.infinity_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    t = threading.Thread(target=run_bot)
+    t.start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
